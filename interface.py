@@ -32,7 +32,7 @@ Running Session Correction Log:
 """
 
 def review_transaction(transaction: dict, correction_log: list) -> str:
-    """Compiles context, handles communication with Gemini, and catches blips gracefully."""
+    """Compiles context, handles communication with Gemini, and catches bugs transparently."""
     log_text = "\n".join([f"- {item}" for item in correction_log]) if correction_log else "No corrections recorded yet."
     contextual_system_prompt = SYSTEM_PROMPT.format(correction_log=log_text)
     transaction_json = json.dumps(transaction, indent=2)
@@ -48,7 +48,8 @@ def review_transaction(transaction: dict, correction_log: list) -> str:
         )
         return response.text
     except Exception as e:
-        return f"Conclusion: NEED_MORE_INFO\n\n⚠️ Upstream Connection Blip: Rate limit hit or API adjustment needed. Please try re-running analysis."
+        # Exposes the literal, raw error message directly to the UI for troubleshooting
+        return f"Conclusion: NEED_MORE_INFO\n\n⚠️ Debug Error Trace: {str(e)}"
 
 # Initialize State
 if "corrections" not in st.session_state:
@@ -97,46 +98,4 @@ with col1:
     st.json(tx_data)
 
     if st.button("⚡ Run Agent Analysis", type="primary"):
-        with st.spinner("Agent running risk-triage evaluation chains..."):
-            analysis_output = review_transaction(tx_data, st.session_state.corrections)
-            st.session_state.current_analysis = analysis_output
-
-    if st.session_state.current_analysis:
-        st.subheader("🧠 Real-time Judgment Execution")
-        
-        analysis_lines = st.session_state.current_analysis.lower().split('\n')
-        is_clear = any("clear" in line for line in analysis_lines if "conclusion" in line)
-        is_info = any("need_more_info" in line or "need more info" in line for line in analysis_lines if "conclusion" in line)
-        is_escalate = any("escalate" in line for line in analysis_lines if "conclusion" in line)
-
-        if is_clear:
-            st.success("🟩 CONCLUSION: CLEAR")
-        elif is_info:
-            st.warning("🟨 CONCLUSION: NEED MORE INFO")
-        elif is_escalate:
-            st.error("🟥 CONCLUSION: ESCALATE")
-            
-        st.markdown(st.session_state.current_analysis)
-
-with col2:
-    st.header("🔄 Pace Continuous Correction Loop")
-    st.write("Inject dynamic human context into the session memory log to realign the agent's reasoning.")
-
-    human_input = st.text_input("💬 Text Feedback Input:")
-    if st.button("➕ Inject Text Context"):
-        if human_input:
-            st.session_state.corrections.append(human_input.strip())
-            st.toast("Context Injected!", icon="📝")
-            st.rerun()
-
-    if st.button("🗑️ Reset Session Memory"):
-        st.session_state.corrections = []
-        st.session_state.current_analysis = ""
-        st.rerun()
-
-    st.subheader("📜 Session Memory Log")
-    if st.session_state.corrections:
-        for idx, correction in enumerate(st.session_state.corrections):
-            st.info(f"**Correction #{idx+1}:** {correction}")
-    else:
-        st.caption("*Log is completely empty. Agent processing exclusively via global regulations.*")
+        with st
