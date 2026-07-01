@@ -6,8 +6,11 @@ from google.genai import types
 # 1. Premium UI Page Configuration
 st.set_page_config(page_title="Zamp AI Compliance Agent", layout="wide")
 
-# Initialize the Google GenAI Client
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialize the Google GenAI Client cleanly using the explicit Streamlit backend secret key
+try:
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+except Exception as key_err:
+    st.error(f"Failed to load GEMINI_API_KEY from Streamlit secrets: {str(key_err)}")
 
 # 2. Strategic Criteria-Based System Prompt (Fully Un-rigged)
 SYSTEM_PROMPT = """
@@ -48,7 +51,7 @@ def review_transaction(transaction: dict, correction_log: list) -> str:
         )
         return response.text
     except Exception as e:
-        # Exposes the literal, raw error message directly to the UI for troubleshooting
+        # Exposes the literal, raw error message directly to the UI for pinpoint troubleshooting
         return f"Conclusion: NEED_MORE_INFO\n\n⚠️ Debug Error Trace: {str(e)}"
 
 # Initialize State
@@ -98,4 +101,46 @@ with col1:
     st.json(tx_data)
 
     if st.button("⚡ Run Agent Analysis", type="primary"):
-        with st
+        with st.spinner("Agent running risk-triage evaluation chains..."):
+            analysis_output = review_transaction(tx_data, st.session_state.corrections)
+            st.session_state.current_analysis = analysis_output
+
+    if st.session_state.current_analysis:
+        st.subheader("🧠 Real-time Judgment Execution")
+        
+        analysis_lines = st.session_state.current_analysis.lower().split('\n')
+        is_clear = any("clear" in line for line in analysis_lines if "conclusion" in line)
+        is_info = any("need_more_info" in line or "need more info" in line for line in analysis_lines if "conclusion" in line)
+        is_escalate = any("escalate" in line for line in analysis_lines if "conclusion" in line)
+
+        if is_clear:
+            st.success("🟩 CONCLUSION: CLEAR")
+        elif is_info:
+            st.warning("🟨 CONCLUSION: NEED MORE INFO")
+        elif is_escalate:
+            st.error("🟥 CONCLUSION: ESCALATE")
+            
+        st.markdown(st.session_state.current_analysis)
+
+with col2:
+    st.header("🔄 Pace Continuous Correction Loop")
+    st.write("Inject dynamic human context into the session memory log to realign the agent's reasoning.")
+
+    human_input = st.text_input("💬 Text Feedback Input:")
+    if st.button("➕ Inject Text Context"):
+        if human_input:
+            st.session_state.corrections.append(human_input.strip())
+            st.toast("Context Injected!", icon="📝")
+            st.rerun()
+
+    if st.button("🗑️ Reset Session Memory"):
+        st.session_state.corrections = []
+        st.session_state.current_analysis = ""
+        st.rerun()
+
+    st.subheader("📜 Session Memory Log")
+    if st.session_state.corrections:
+        for idx, correction in enumerate(st.session_state.corrections):
+            st.info(f"**Correction #{idx+1}:** {correction}")
+    else:
+        st.caption("*Log is completely empty. Agent processing exclusively via global regulations.*")
