@@ -1,5 +1,7 @@
 import streamlit as st
 import json
+import time
+import random
 from google import genai
 from google.genai import types
 
@@ -25,12 +27,7 @@ if "client" not in st.session_state:
         st.session_state.client_error = f"Client initialization failed: {e}"
 
 # =====================================================================
-# SYSTEM PROMPT — the model is given criteria for weighing a human
-# correction, not told what conclusion to reach for any named
-# transaction. It has to actually reason about whether a correction is
-# credible, and it has to say so explicitly (audit trail), which
-# matters a lot in a compliance context and is more honest than a
-# rigged demo.
+# SYSTEM PROMPT — Criteria-based reasoning preservation.
 # =====================================================================
 SYSTEM_PROMPT = """
 You are an institutional Financial Compliance AI Agent reviewing corporate payouts for Anti-Money Laundering (AML) and sanctions/risk triage.
@@ -64,38 +61,48 @@ Session correction log so far:
 {correction_log}
 """
 
-
 def review_transaction(transaction: dict, correction_log: list):
     """
-    Calls Gemini to evaluate a transaction. Returns a tuple:
-    (success: bool, text: str)
-
-    On failure, returns (False, <error message>). The caller is
-    responsible for rendering that as a visible error state — there is
-    no local fallback that pretends to be a model judgment. A fake
-    "offline compliance engine" is worse than no answer at all in this
-    context, so we don't do it.
+    Calls Gemini to evaluate a transaction with explicit Exponential Backoff
+    handling for transient 429 rate limits. Returns a tuple: (success: bool, text: str)
     """
     if st.session_state.client is None:
         return False, st.session_state.client_error or "Gemini client is not initialized."
 
     log_text = "\n".join([f"- {item}" for item in correction_log]) if correction_log else "No corrections recorded yet."
+    
+    # Backoff configuration parameters
+    max_retries = 4
+    initial_delay = 1.0
+    backoff_factor = 2.0
 
-    try:
-        response = st.session_state.client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=f"Evaluate this transaction payload:\n{json.dumps(transaction, indent=2)}",
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT.format(correction_log=log_text),
-                temperature=0.1,
+    for attempt in range(max_retries):
+        try:
+            response = st.session_state.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=f"Evaluate this transaction payload:\n{json.dumps(transaction, indent=2)}",
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT.format(correction_log=log_text),
+                    temperature=0.1,
+                )
             )
-        )
-        if not response.text:
-            return False, "Model returned an empty response. Please retry."
-        return True, response.text
-    except Exception as e:
-        return False, f"Live model call failed: {e}"
+            if not response.text:
+                return False, "Model returned an empty response. Please retry."
+            return True, response.text
 
+        except Exception as e:
+            error_str = str(e)
+            # Only intercept and retry if it's a transient 429 rate limit
+            if "429" in error_str and attempt < max_retries - 1:
+                # Apply exponential delay backoff with a micro jitter to avoid synchronous collisions
+                sleep_time = (initial_delay * (backoff_factor ** attempt)) + random.uniform(0, 0.5)
+                time.sleep(sleep_time)
+                continue
+            else:
+                # Hard break for daily exhaustion limits or non-429 exceptions to display transparently
+                return False, f"Live model call failed: {e}"
+
+    return False, "Live model call failed due to persistent rate limits after multiple backoff attempts."
 
 # =====================================================================
 # SESSION STATE
@@ -106,6 +113,8 @@ if "current_analysis" not in st.session_state:
     st.session_state.current_analysis = ""
 if "analysis_ok" not in st.session_state:
     st.session_state.analysis_ok = None
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
 
 # =====================================================================
 # DEMO SCENARIOS
@@ -161,14 +170,26 @@ with col1:
     tx_data = transactions[selected_tx_name]
     st.json(tx_data)
 
-    run_disabled = st.session_state.client is None
-    if st.button("⚡ Run Agent Analysis", type="primary", disabled=run_disabled):
+    # Disable button dynamically if client is missing OR if an evaluation is currently running
+    button_disabled = (st.session_state.client is None) or st.session_state.is_processing
+    button_label = "⌛ Analysis in Progress..." if st.session_state.is_processing else "⚡ Run Agent Analysis"
+
+    if st.button(button_label, type="primary", disabled=button_disabled):
+        st.session_state.is_processing = True
+        st.rerun()  # Forces immediate visual UI lock of the execution button
+
+# Deferred Execution Block: Runs safely while UI button elements are entirely grayed out
+if st.session_state.is_processing:
+    with col1:
         with st.spinner("Agent running risk-triage evaluation chains..."):
             ok, result = review_transaction(tx_data, st.session_state.corrections)
             st.session_state.analysis_ok = ok
             st.session_state.current_analysis = result
+    st.session_state.is_processing = False
+    st.rerun()
 
-    if st.session_state.current_analysis:
+with col1:
+    if st.session_state.current_analysis and not st.session_state.is_processing:
         if st.session_state.analysis_ok is False:
             st.error(f"🔴 Agent call failed — no judgment was produced.\n\n{st.session_state.current_analysis}")
         else:
@@ -195,14 +216,16 @@ with col2:
     st.header("🔄 Pace Continuous Correction Loop")
     st.write("Inject human context into the session memory log. The agent evaluates each correction on its merits — specificity, relevance, consistency, verifiability — not just its presence.")
 
-    human_input = st.text_input("💬 Text Feedback Input:")
-    if st.button("➕ Inject Text Context"):
+    human_input = st.text_input("💬 Text Feedback Input:", disabled=st.session_state.is_processing)
+    
+    # Disable control triggers when execution chains are actively evaluating
+    if st.button("➕ Inject Text Context", disabled=st.session_state.is_processing):
         if human_input:
             st.session_state.corrections.append(human_input.strip())
             st.toast("Context Injected!", icon="📝")
             st.rerun()
 
-    if st.button("🗑️ Reset Session Memory"):
+    if st.button("🗑️ Reset Session Memory", disabled=st.session_state.is_processing):
         st.session_state.corrections = []
         st.session_state.current_analysis = ""
         st.session_state.analysis_ok = None
