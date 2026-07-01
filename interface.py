@@ -7,7 +7,7 @@ from google.genai import types
 st.set_page_config(page_title="Zamp AI Compliance Agent", layout="wide")
 
 # Initialize the Google GenAI Client
-client = genai.Client()
+client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 # 2. Strategic Criteria-Based System Prompt (Fully Un-rigged)
 SYSTEM_PROMPT = """
