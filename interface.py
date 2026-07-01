@@ -6,11 +6,12 @@ from google.genai import types
 # 1. Premium UI Page Configuration
 st.set_page_config(page_title="Zamp AI Compliance Agent", layout="wide")
 
-# Initialize the Google GenAI Client cleanly using the explicit Streamlit backend secret key
-try:
-    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-except Exception as key_err:
-    st.error(f"Failed to load GEMINI_API_KEY from Streamlit secrets: {str(key_err)}")
+# Initialize Client safely
+if "client" not in st.session_state:
+    try:
+        st.session_state.client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    except Exception as key_err:
+        st.error(f"Secret Key Initialization Error: {str(key_err)}")
 
 # 2. Strategic Criteria-Based System Prompt (Fully Un-rigged)
 SYSTEM_PROMPT = """
@@ -35,13 +36,13 @@ Running Session Correction Log:
 """
 
 def review_transaction(transaction: dict, correction_log: list) -> str:
-    """Compiles context, handles communication with Gemini, and catches bugs transparently."""
+    """Compiles context and hits Gemini under strict session execution parameters."""
     log_text = "\n".join([f"- {item}" for item in correction_log]) if correction_log else "No corrections recorded yet."
     contextual_system_prompt = SYSTEM_PROMPT.format(correction_log=log_text)
     transaction_json = json.dumps(transaction, indent=2)
     
     try:
-        response = client.models.generate_content(
+        response = st.session_state.client.models.generate_content(
             model='gemini-2.5-flash',
             contents=f"Evaluate this transaction payload against system criteria:\n{transaction_json}",
             config=types.GenerateContentConfig(
@@ -51,10 +52,9 @@ def review_transaction(transaction: dict, correction_log: list) -> str:
         )
         return response.text
     except Exception as e:
-        # Exposes the literal, raw error message directly to the UI for pinpoint troubleshooting
         return f"Conclusion: NEED_MORE_INFO\n\n⚠️ Debug Error Trace: {str(e)}"
 
-# Initialize State
+# Initialize Session UI States
 if "corrections" not in st.session_state:
     st.session_state.corrections = []
 if "current_analysis" not in st.session_state:
@@ -100,6 +100,7 @@ with col1:
     tx_data = transactions[selected_tx_name]
     st.json(tx_data)
 
+    # State locked execution button to protect network rate thresholds
     if st.button("⚡ Run Agent Analysis", type="primary"):
         with st.spinner("Agent running risk-triage evaluation chains..."):
             analysis_output = review_transaction(tx_data, st.session_state.corrections)
