@@ -1,6 +1,5 @@
 import streamlit as st
 import json
-import os
 from google import genai
 from google.genai import types
 
@@ -8,10 +7,9 @@ from google.genai import types
 st.set_page_config(page_title="Zamp AI Compliance Agent", layout="wide")
 
 # Initialize the Google GenAI Client
-# In production on Streamlit Cloud, this automatically reads the GEMINI_API_KEY from Advanced Secrets
 client = genai.Client()
 
-# 2. Strategic Criteria-Based System Prompt (Solution 2 - Fully Un-rigged)
+# 2. Strategic Criteria-Based System Prompt (Fully Un-rigged)
 SYSTEM_PROMPT = """
 You are an institutional Financial Compliance AI Agent reviewing corporate payouts for Anti-Money Laundering (AML) and compliance risk-triage. 
 
@@ -45,38 +43,20 @@ def review_transaction(transaction: dict, correction_log: list) -> str:
             contents=f"Evaluate this transaction payload against system criteria:\n{transaction_json}",
             config=types.GenerateContentConfig(
                 system_instruction=contextual_system_prompt,
-                temperature=0.1,  # Kept low for deterministic compliance testing
+                temperature=0.1,
             )
         )
         return response.text
     except Exception as e:
-        return f"Conclusion: NEED_MORE_INFO\n\n⚠️ Upstream Connection Blip: {str(e)}. Please click '⚡ Run Agent Analysis' again to re-triage."
+        return f"Conclusion: NEED_MORE_INFO\n\n⚠️ Upstream Connection Blip: Rate limit hit or API adjustment needed. Please try re-running analysis."
 
-def transcribe_audio_native(audio_bytes: bytes, mime_type: str) -> str:
-    """Leverages Gemini 2.5 Flash's native multimodal capabilities to transcribe raw spoken audio."""
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[
-                types.Part.from_bytes(
-                    data=audio_bytes,
-                    mime_type=mime_type,
-                ),
-                "Transcribe this compliance voice note completely. Return ONLY the literal transcribed text string. Do not append metadata, pleasantries, or introductory labels."
-            ]
-        )
-        return response.text.strip()
-    except Exception as e:
-        st.error(f"Multimodal Transcription Layer Failed: {e}")
-        return ""
-
-# 3. Persistent UI State Tracking
+# Initialize State
 if "corrections" not in st.session_state:
     st.session_state.corrections = []
 if "current_analysis" not in st.session_state:
     st.session_state.current_analysis = ""
 
-# 4. Realistic Un-Scripted Scenarios
+# Scenarios
 transactions = {
     "Transaction A (Standard Operating Baseline)": {
         "amount": 48500,
@@ -104,17 +84,15 @@ transactions = {
     }
 }
 
-# 5. UI Layout Blueprint
 st.title("🛡️ Zamp AI Compliance Judgment Agent")
-st.caption("A premium functional paradigm demonstrating calibrated context absorption vs. rigid static rules engines.")
+st.caption("Built for Pace: Dynamic Context Absorption vs. Legacy Static Rule Engines.")
 st.markdown("---")
 
 col1, col2 = st.columns([1, 1], gap="large")
 
-# Left Column: Ingestion and AI Logic Analysis
 with col1:
-    st.header("📋 Transaction Desk")
-    selected_tx_name = st.selectbox("Select active payload to route to Agent:", list(transactions.keys()))
+    st.header("📋 Transaction Under Audit")
+    selected_tx_name = st.selectbox("Select transaction to stream to Agent:", list(transactions.keys()))
     tx_data = transactions[selected_tx_name]
     st.json(tx_data)
 
@@ -126,7 +104,6 @@ with col1:
     if st.session_state.current_analysis:
         st.subheader("🧠 Real-time Judgment Execution")
         
-        # Safe multi-line string normalization
         analysis_lines = st.session_state.current_analysis.lower().split('\n')
         is_clear = any("clear" in line for line in analysis_lines if "conclusion" in line)
         is_info = any("need_more_info" in line or "need more info" in line for line in analysis_lines if "conclusion" in line)
@@ -141,39 +118,25 @@ with col1:
             
         st.markdown(st.session_state.current_analysis)
 
-# Right Column: The Pace Correction Loop
 with col2:
     st.header("🔄 Pace Continuous Correction Loop")
-    st.write("Inject dynamic context into the active session log to realign the agent's baseline risk weights.")
+    st.write("Inject dynamic human context into the session memory log to realign the agent's reasoning.")
 
-    human_input = st.text_input("💬 Text Feedback Input:", placeholder="Type a verified compliance override record...")
+    human_input = st.text_input("💬 Text Feedback Input:")
     if st.button("➕ Inject Text Context"):
         if human_input:
             st.session_state.corrections.append(human_input.strip())
             st.toast("Context Injected!", icon="📝")
             st.rerun()
 
-    # Native Multimodal Audio Stream Section
-    audio_file = st.audio_input("🎙️ Speak Live Verification Note directly to Agent:")
-    if audio_file:
-        audio_bytes = audio_file.read()
-        mime_type = audio_file.type
-        
-        with st.spinner("Gemini reading native audio bytes..."):
-            transcription = transcribe_audio_native(audio_bytes, mime_type)
-            if transcription:
-                st.session_state.corrections.append(transcription)
-                st.success(f"🎙️ Logged Voice Input: \"{transcription}\"")
-                st.rerun()
-
     if st.button("🗑️ Reset Session Memory"):
         st.session_state.corrections = []
         st.session_state.current_analysis = ""
         st.rerun()
 
-    st.subheader("📜 Running Session Log")
+    st.subheader("📜 Session Memory Log")
     if st.session_state.corrections:
         for idx, correction in enumerate(st.session_state.corrections):
             st.info(f"**Correction #{idx+1}:** {correction}")
     else:
-        st.caption("*Log empty. Agent interpreting data strictly on standard global regulatory parameters.*")
+        st.caption("*Log is completely empty. Agent processing exclusively via global regulations.*")
